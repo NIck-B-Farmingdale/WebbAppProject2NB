@@ -1,7 +1,9 @@
 const express = require('express');
-// Imports new database and security tools
+// Imports my database and security tools
 const sqlite3 = require('sqlite3').verbose();
 const bcrypt = require('bcrypt');
+// Imports session management
+const session = require('express-session');
 
 const app = express();
 const port = 3000;
@@ -15,6 +17,13 @@ app.use(express.static('public'));
 // Middleware to read data submitted from HTML forms
 app.use(express.urlencoded({ extended: true }));
 app.use(express.json());
+
+// Configures Sessions - this creates a secure cookie in the user's browser.
+app.use(session({
+    secret: 'my-super-secret-key-123', // In a real app, this goes in the .env file!
+    resave: false,
+    saveUninitialized: false
+}));
 
 // Database Setup. This creates a file called 'users.db' automatically.
 const db = new sqlite3.Database('./users.db', (err) => {
@@ -68,6 +77,59 @@ app.post('/register', async (req, res) => {
         console.error(error);
         res.status(500).send('Server error during registration.');
     }
+});
+
+// Displays the Login Page
+app.get('/login', (req, res) => {
+    // Grabs the message from the URL if it exists (like the success message above)
+    const msg = req.query.msg || null;
+    res.render('login', { msg: msg, error: null });
+});
+
+// Handles Login Form Submission
+app.post('/login', (req, res) => {
+    const { username, password } = req.body;
+    
+    // 1. Find the user in the database
+    db.get(`SELECT * FROM users WHERE username = ?`, [username], async (err, user) => {
+        if (err || !user) {
+            return res.render('login', { error: 'Invalid username or password.', msg: null });
+        }
+        
+        // 2. Compare the typed password with the hashed password in the database
+        const match = await bcrypt.compare(password, user.password);
+        
+        if (match) {
+            // 3. Passwords match, save their ID to the session and send them to the app
+            req.session.userId = user.id; 
+            req.session.username = user.username; // Saving this to say "Hello, [Name]" later
+            res.redirect('/app');
+        } else {
+            res.render('login', { error: 'Invalid username or password.', msg: null });
+        }
+    });
+});
+
+// "Security" middleware
+// This checks if a user is logged in before letting them see a page
+const requireLogin = (req, res, next) => {
+    if (req.session.userId) {
+        next(); // They are logged in, let them through
+    } else {
+        res.redirect('/login?msg=You must log in to view that page.');
+    }
+};
+
+// The main app page (protected by requireLogin)
+app.get('/app', requireLogin, (req, res) => {
+    // This code passes the username to the template
+    res.render('app', { username: req.session.username });
+});
+
+// Logout Route
+app.get('/logout', (req, res) => {
+    req.session.destroy(); // Destroy the session cookie
+    res.redirect('/login?msg=You have been logged out.');
 });
 
 // Start the server

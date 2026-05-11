@@ -1,0 +1,16 @@
+<%- include('partials/head') %>
+
+<main class="container" style="max-width: 600px;">
+    <h2>IT Help Desk Dashboard</h2>
+    
+    <!--Using the session variable I passed from the server-->
+    <p>Welcome, <b><%= username %></b>! You are securely logged in.</p>
+    
+    <div style="padding: 40px; background-color: #2c2c2c; border-radius: 4px; margin: 20px 0;">
+        <p style="color: #888;">[ AI Chat Interface will go here ]</p>
+    </div>
+
+    <a href="/logout" class="btn btn-outline" style="width: 100%; box-sizing: border-box;">Log Out</a>
+</main>
+
+<%- include('partials/footer') %>

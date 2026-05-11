@@ -13,5 +13,13 @@ Development Timeline/Changelog-
 
  1. added registration view which sends newly registered user info to the /register POST route which will then save said info into the database.
 
+ 2. integrated express-session to generate secure browser cookies, allowing the server to remember logged-in users across different pages.
+
+ 3. built a custom route-protection function (requireLogin) which acts as a sort of "security guard", pushing unauthenticated users back to the login screen if they try to access the main app through the url or otherwise.
+
+ 4. updated the EJS views to accept server-side variables and to dynamically display various conditional UI alerts ("Invalid password" or "logged in successfully").
+
+ 6. added complete, secure routing for user registratiom, login, and logout.
+
 
 
