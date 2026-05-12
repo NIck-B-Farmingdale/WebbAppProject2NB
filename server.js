@@ -1,9 +1,19 @@
+// Loads environment variables from the .env file FIRST
+require('dotenv').config();
+
 const express = require('express');
-// Imports my database and security tools
+// Imports the database and security tools
 const sqlite3 = require('sqlite3').verbose();
+
+// bcrypt allows me to encrypt user passwords in the database
 const bcrypt = require('bcrypt');
+
 // Imports session management
 const session = require('express-session');
+
+// Import and initialize the Gemini API
+const { GoogleGenerativeAI } = require('@google/generative-ai');
+const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
 
 const app = express();
 const port = 3000;
@@ -18,14 +28,14 @@ app.use(express.static('public'));
 app.use(express.urlencoded({ extended: true }));
 app.use(express.json());
 
-// Configures Sessions - this creates a secure cookie in the user's browser.
+// Configures Sessions - securely pulls the secret from the .env file
 app.use(session({
-    secret: 'my-super-secret-key-123', // In a real app, this goes in the .env file!
+    secret: process.env.SESSION_SECRET, 
     resave: false,
     saveUninitialized: false
 }));
 
-// Database Setup. This creates a file called 'users.db' automatically.
+// Database setup - this creates a file called 'users.db' automatically.
 const db = new sqlite3.Database('./users.db', (err) => {
     if (err) console.error(err.message);
     console.log('Connected to the SQLite database.');
@@ -39,20 +49,20 @@ db.run(`CREATE TABLE IF NOT EXISTS users (
     password TEXT
 )`);
 
-// --- ROUTES ---
+// ROUTES:
 
-// Route 1: The Homepage
+// Route 1: the Homepage
 app.get('/', (req, res) => {
     res.render('index');
 });
 
-// Route 2 - Display the Registration Page
+// Route 2 - display the Registration page
 app.get('/register', (req, res) => {
-    // We pass an 'error' variable set to null initially.
+    // passes an 'error' variable set to null initially.
     res.render('register', { error: null });
 });
 
-// Route 3 - Handle the Registration Form Submission
+// Route 3 - handle the Registration form submission
 app.post('/register', async (req, res) => {
     // Extract the data from the form
     const { username, email, password } = req.body;
@@ -130,6 +140,28 @@ app.get('/app', requireLogin, (req, res) => {
 app.get('/logout', (req, res) => {
     req.session.destroy(); // Destroy the session cookie
     res.redirect('/login?msg=You have been logged out.');
+});
+
+// AI ROUTE: GEMINI AI CHAT ENDPOINT
+// IMPORTANT: This is protected by requireLogin, unregistered users cannot use the API.
+app.post('/api/chat', requireLogin, async (req, res) => {
+    const { prompt } = req.body;
+    
+    try {
+        const model = genAI.getGenerativeModel({ 
+            model: "gemini-3.1-flash-lite",
+            systemInstruction: "You are a Tier 1 IT Help Desk assistant. Be polite, concise, and help the user diagnose their tech issue step-by-step."
+        });
+        
+        // This passes the user's prompt directly
+        const result = await model.generateContent(`User says: ${prompt}`);
+        const response = await result.response;
+        
+        res.json({ reply: response.text() });
+    } catch (error) {
+        console.error("Gemini API Error:", error);
+        res.status(500).json({ error: 'Failed to communicate with the AI.' });
+    }
 });
 
 // Start the server

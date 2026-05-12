@@ -1,16 +1,113 @@
 <%- include('partials/head') %>
 
-<main class="container" style="max-width: 600px;">
+<main class="container" style="max-width: 600px; width: 100%;">
     <h2>IT Help Desk Dashboard</h2>
+    <p style="text-align: center; margin-bottom: 20px;">Welcome, <b><%= username %></b>.</p>
     
-    <!--Using the session variable I passed from the server-->
-    <p>Welcome, <b><%= username %></b>! You are securely logged in.</p>
+    <!--AI chat box area-->
+    <div id="chat-box" style="height: 350px; overflow-y: auto; background: #121212; padding: 15px; border-radius: 6px; margin-bottom: 15px; text-align: left; border: 1px solid #333;">
+        <div style="margin-bottom: 15px; color: #2196F3;">
+            <b>Agent:</b> Hello! I'm your IT Support Assistant. Describe your hardware or software issue, and I'll help you troubleshoot it.
+        </div>
+    </div>
     
-    <div style="padding: 40px; background-color: #2c2c2c; border-radius: 4px; margin: 20px 0;">
-        <p style="color: #888;">[ AI Chat Interface will go here ]</p>
+    <!--The input area-->
+    <div style="display: flex; gap: 10px; margin-bottom: 20px;">
+        <input type="text" id="prompt" placeholder="E.g., My monitor won't turn on..." 
+               style="flex: 1; padding: 12px; border-radius: 4px; border: 1px solid #333; background-color: #2c2c2c; color: white;">
+        <button onclick="sendMessage()" class="btn" id="send-btn" style="margin: 0;">Send</button>
     </div>
 
-    <a href="/logout" class="btn btn-outline" style="width: 100%; box-sizing: border-box;">Log Out</a>
+    <a href="/logout" class="btn btn-outline" style="width: 100%; box-sizing: border-box; text-align: center;">Log Out</a>
 </main>
+
+<script>
+    // --- CLIENT-SIDE JAVASCRIPT ---
+    // This code runs entirely in the user's web browser, NOT on the server.
+    // It's responsible for taking the user's input, sending it to the Node.js backend, waiting for the AI to reply, and updating the screen without refreshing the page.
+
+    // I used an 'async' function because I'm making a network request (fetch) that takes time to complete. The browser needs to wait for the response.
+    async function sendMessage() {
+        // 1. Grab the HTML elements I need to interact with
+        const promptInput = document.getElementById('prompt'); // The text box
+        const chatBox = document.getElementById('chat-box');   // The main chat window
+        const sendBtn = document.getElementById('send-btn');   // The send button
+        
+        // 2. Get the text the user typed and remove any extra spaces from the ends
+        const text = promptInput.value.trim();
+        
+        // 3. Guard clause: If the user didn't type anything, just stop the function right here
+        if (!text) return; 
+
+        // 4. Update the UI to show the user's message immediately
+        // 'innerHTML +=' adds new HTML to the end of whatever is already inside the chat box
+        chatBox.innerHTML += `<div style="margin-bottom: 15px; color: #4CAF50;"><b>You:</b> ${text}</div>`;
+        
+        // Clear the text box so they can type their next message
+        promptInput.value = '';
+        
+        // Disable the send button so they don't spam the API while it's thinking
+        sendBtn.disabled = true;
+        sendBtn.innerText = 'Thinking...';
+        
+        // Auto-scroll the chat box to the very bottom so the newest message is visible
+        chatBox.scrollTop = chatBox.scrollHeight; 
+
+        // 5. Wraps the network call in a try/catch block to handle errors gracefully (e.g., server down)
+        try {
+            // 6. The Fetch API: this is how the browser is able to communicate with the server in the background
+            //'await' the response because it has to travel to the server, then to Google, and back.
+            const response = await fetch('/api/chat', {
+                method: 'POST', // I am sending data, so I must use POST
+                headers: { 'Content-Type': 'application/json' }, // Tells the server to expect JSON data
+                body: JSON.stringify({ prompt: text }) // Converts the JavaScript object into a JSON string
+            });
+
+            // 7. Security Check: If the server says '401 Unauthorized', their login session expired
+            if (response.status === 401) {
+                alert("Session expired. Please log in again.");
+                window.location.href = '/login'; // Boot them back to the login page
+                return;
+            }
+
+
+            // 8. Parses the JSON response I get back from the backend
+            const data = await response.json();
+
+            
+            // 9. Format the text: The AI might send back text with \n (newline characters).
+            // I used a regular expression (/\n/g) to replace all newlines with HTML <br> tags so they actually look like line breaks in the browser.
+            const formattedReply = data.reply ? data.reply.replace(/\n/g, '<br>') : 'Error parsing response.';
+
+            
+            // 10. Inject the AI's formatted response into the chat box
+            chatBox.innerHTML += `<div style="margin-bottom: 15px; color: #2196F3;"><b>Agent:</b> ${formattedReply}</div>`;
+
+            
+        } catch (err) {
+            // If something goes critically wrong (like their internet drops), throw an error message
+            console.error("Network or server error:", err);
+            chatBox.innerHTML += `<div style="margin-bottom: 15px; color: #ff4c4c;"><b>Error:</b> Could not reach server.</div>`;
+
+        } finally {
+            // 11. The 'finally' block runs no matter what happens (success or failure).
+            // It's used to re-enable the button and scroll to the bottom one last time.
+            sendBtn.disabled = false;
+            sendBtn.innerText = 'Send';
+            chatBox.scrollTop = chatBox.scrollHeight;
+        }
+    }
+
+    
+    // This event listener makes it so the user can press the "Enter" key on their keyboard to send a message instead of having to manually click the "Send" button every single time.
+    document.getElementById("prompt").addEventListener("keypress", function(event) {
+        
+        // Check if the key that was pressed was 'Enter'
+        if (event.key === "Enter") {
+            event.preventDefault(); // Stop the enter key from doing its default behavior (like submitting a form)
+            sendMessage(); // Triggers the async function above
+        }
+    });
+</script>
 
 <%- include('partials/footer') %>
