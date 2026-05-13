@@ -2,8 +2,6 @@
 require('dotenv').config();
 
 const express = require('express');
-// Imports the database and security tools
-const sqlite3 = require('sqlite3').verbose();
 
 // bcrypt allows me to encrypt user passwords in the database
 const bcrypt = require('bcrypt');
@@ -11,12 +9,19 @@ const bcrypt = require('bcrypt');
 // Imports session management
 const session = require('express-session');
 
+// CODE REFACTOR: replacing all sqlite3 functionality with MongoDB functionality
+// Imports MongoDB tools
+const mongoose = require('mongoose');
+const MongoDBStore = require('connect-mongodb-session')(session);
+
 // Import and initialize the Gemini API
 const { GoogleGenerativeAI } = require('@google/generative-ai');
-const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
 
 const app = express();
-const port = 3000;
+
+// Use environment port for Render, default to 3000 for local
+const port = process.env.PORT || 3000;
+const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
 
 // Tells Express I'm using EJS for my views
 app.set('view engine', 'ejs');
@@ -28,26 +33,48 @@ app.use(express.static('public'));
 app.use(express.urlencoded({ extended: true }));
 app.use(express.json());
 
-// Configures Sessions - securely pulls the secret from the .env file
-app.use(session({
-    secret: process.env.SESSION_SECRET, 
-    resave: false,
-    saveUninitialized: false
-}));
+// Connect to MongoDB Atlas
+mongoose.connect(process.env.MONGODB_URI)
+    .then(() => console.log('Connected to MongoDB Atlas!'))
+    .catch(err => console.error('MongoDB connection error:', err));
 
-// Database setup - this creates a file called 'users.db' automatically.
-const db = new sqlite3.Database('./users.db', (err) => {
-    if (err) console.error(err.message);
-    console.log('Connected to the SQLite database.');
+// Defines the new User schema and model (replacing SQLite CREATE TABLE)
+const userSchema = new mongoose.Schema({
+    username: { type: String, required: true, unique: true },
+    email: { type: String, required: true, unique: true },
+    password: { type: String, required: true }
+});
+const User = mongoose.model('User', userSchema);
+
+//New mongoose schema for storing chat history
+const messageSchema = new mongoose.Schema({
+    userId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
+    role: { type: String, enum: ['user', 'model'], required: true },
+    parts: [{ text: { type: String, required: true } }], // Matching Gemini's format
+    createdAt: { type: Date, default: Date.now }
 });
 
-// Creates the users table if it doesn't already exist
-db.run(`CREATE TABLE IF NOT EXISTS users (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    username TEXT UNIQUE,
-    email TEXT UNIQUE,
-    password TEXT
-)`);
+const Message = mongoose.model('Message', messageSchema);
+
+// 1. Initialize the new store
+const store = new MongoDBStore({
+    uri: process.env.MONGODB_URI,
+    collection: 'mySessions' // This creates a 'mySessions' folder in your database
+});
+
+// 2. Catch any connection errors specifically for the session
+store.on('error', function(error) {
+    console.error('Session store error:', error);
+});
+
+// 3. Configure the session middleware
+app.use(session({
+    secret: process.env.SESSION_SECRET,
+    resave: false,
+    saveUninitialized: false,
+    store: store, // Plugs into the new store That I just built above
+    cookie: { maxAge: 1000 * 60 * 60 * 24 }
+}));
 
 // ROUTES:
 
@@ -62,62 +89,64 @@ app.get('/register', (req, res) => {
     res.render('register', { error: null });
 });
 
-// Route 3 - handle the Registration form submission
+// Route 3 - handle the Registration form submission 
+// (now refactored for compatibility with MongoDB)
 app.post('/register', async (req, res) => {
-    // Extract the data from the form
     const { username, email, password } = req.body;
-    
     try {
-        // Scrambles the password using bcrypt with 10 "salt" rounds
         const hashedPassword = await bcrypt.hash(password, 10);
-        
-        // Saves the new user to the database
-        db.run(`INSERT INTO users (username, email, password) VALUES (?, ?, ?)`, 
-            [username, email, hashedPassword], 
-            function(err) {
-                if (err) {
-                    // SQLite throws an error if the username or email already exists
-                    return res.render('register', { error: 'Username or Email already exists.' });
-                }
-                // If successful, redirect them to the login page
-                res.redirect('/login?msg=Registered successfully! Please log in.');
-            }
-        );
+        // Creates the user in MongoDB
+        await User.create({ username, email, password: hashedPassword });
+        res.redirect('/login?msg=Registered successfully! Please log in.');
     } catch (error) {
+        // Mongoose throws error code 11000 if a unique field (like username) is taken
+        if (error.code === 11000) {
+            return res.render('register', { error: 'Username or Email already exists.' });
+        }
         console.error(error);
-        res.status(500).send('Server error during registration.');
+        res.status(500).send('Server error.');
     }
 });
 
+
 // Displays the Login Page
 app.get('/login', (req, res) => {
-    // Grabs the message from the URL if it exists (like the success message above)
+    // Grabs the message from the URL if it exists
     const msg = req.query.msg || null;
     res.render('login', { msg: msg, error: null });
 });
 
 // Handles Login Form Submission
-app.post('/login', (req, res) => {
+// (refactored for compatibility with MongoDB)
+app.post('/login', async (req, res) => {
     const { username, password } = req.body;
-    
-    // 1. Find the user in the database
-    db.get(`SELECT * FROM users WHERE username = ?`, [username], async (err, user) => {
-        if (err || !user) {
-            return res.render('login', { error: 'Invalid username or password.', msg: null });
-        }
+    try {
+        // Search MongoDB for the user
+        const user = await User.findOne({ username: username });
         
-        // 2. Compare the typed password with the hashed password in the database
+        if (!user) return res.render('login', { error: 'Invalid credentials.', msg: null });
+        
         const match = await bcrypt.compare(password, user.password);
-        
         if (match) {
-            // 3. Passwords match, save their ID to the session and send them to the app
-            req.session.userId = user.id; 
-            req.session.username = user.username; // Saving this to say "Hello, [Name]" later
-            res.redirect('/app');
+            req.session.userId = user._id.toString(); 
+            req.session.username = user.username;
+            
+            // Force the session to save to the database BEFORE redirecting
+            req.session.save((err) => {
+                if (err) {
+                    console.error("Session save error:", err);
+                    return res.status(500).send('Server error during login.');
+                }
+                // Only redirect after the session is safely in the database
+                res.redirect('/app');
+            });
         } else {
-            res.render('login', { error: 'Invalid username or password.', msg: null });
+            res.render('login', { error: 'Invalid credentials.', msg: null });
         }
-    });
+    } catch (error) {
+        console.error(error);
+        res.status(500).send('Server error.');
+    }
 });
 
 // "Security" middleware
@@ -144,25 +173,70 @@ app.get('/logout', (req, res) => {
 
 // AI ROUTE: GEMINI AI CHAT ENDPOINT
 // IMPORTANT: This is protected by requireLogin, unregistered users cannot use the API.
+// Now 
 app.post('/api/chat', requireLogin, async (req, res) => {
-    const { prompt } = req.body;
-    
+    const userPrompt = req.body.prompt;
+
     try {
+        // 1. Fetch the last 10 messages for this specific user
+        const history = await Message.find({ userId: req.session.userId })
+            .sort({ createdAt: -1 }) 
+            .limit(10);
+        
+        // 2. Reverse and clean the data
+        const chatHistory = history.reverse().map(msg => ({
+            role: msg.role,
+            parts: msg.parts.map(part => ({
+                text: part.text 
+            }))
+        }));
+
+        // 3. Start the chat with history
         const model = genAI.getGenerativeModel({ 
-            model: "gemini-3.1-flash-lite",
-            systemInstruction: "You are a Tier 1 IT Help Desk assistant. Be polite, concise, and help the user diagnose their tech issue step-by-step."
+            model: "gemini-3.1-flash-lite", 
+            systemInstruction: "You are a Tier 1 IT Help Desk assistant. Provide concise, helpful technical support." 
         });
-        
-        // This passes the user's prompt directly
-        const result = await model.generateContent(`User says: ${prompt}`);
-        const response = await result.response;
-        
-        res.json({ reply: response.text() });
+
+        const chatSession = model.startChat({
+            history: chatHistory,
+        });
+
+        const result = await chatSession.sendMessage(userPrompt);
+        const aiResponse = result.response.text();
+
+        // 4. SAVE BOTH MESSAGES to MongoDB
+        await Message.insertMany([
+            { userId: req.session.userId, role: 'user', parts: [{ text: userPrompt }] },
+            { userId: req.session.userId, role: 'model', parts: [{ text: aiResponse }] }
+        ]);
+
+        // UNIVERSAL RESPONSE: sends the text in every format a frontend might expect
+        const payload = { 
+            response: aiResponse, 
+            reply: aiResponse,    
+            text: aiResponse      
+        };
+
+        console.log("--- OUTGOING AI RESPONSE ---");
+        console.log(payload);
+
+        res.json(payload);
+
     } catch (error) {
-        console.error("Gemini API Error:", error);
-        res.status(500).json({ error: 'Failed to communicate with the AI.' });
+        console.error("--- DETAILED CHAT ERROR ---");
+        console.error(error);
+        
+        // Returns a universal error object
+        res.status(500).json({ 
+            response: "IT Help Desk Error: Connection issue.",
+            reply: "IT Help Desk Error: Connection issue.",
+            text: "IT Help Desk Error: Connection issue."
+        });
     }
 });
+
+
+
 
 // Start the server
 app.listen(port, () => {

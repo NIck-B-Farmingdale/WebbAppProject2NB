@@ -1,7 +1,62 @@
-# WebbAppProject2NB
-A web app which utilizes GenAI api to act as a virtual IT help assistant
+EZ-Help-Desk: AI-Powered IT Support agent
 
-Development Timeline/Changelog-
+This is a full-stack tier-1 IT help desk application built with Node.JS and Express, utilizing Google's Gemini API (3.1-flash-lite) for all AI functionality. It features custom-built authentication system with a persistent database (via MongoDB Atlas) which stores/manages account info (username, passwords, emails) and a brief memory of the AI chat history of each account.
+
+
+
+*****FEATURES DEVELOPED*****
+
+1. Secure User Authentication: Registration and login system using bcrypt for password hashing and secure credential storage.
+
+2. Persistent Session Management: Integration of connect-mongodb-session to maintain user login states across server restarts.
+
+3. AI Context Memory: A "Context Window" method that retrieves the last 10 messages from the database to give the AI assistant a brief memory of what was done during the last troubleshooting session(s).
+
+4. Dynamic Response System: Altered the backend to handle Gemini API responses and format them for seamless and easy-to-read frontend display.
+
+5. Tier 1 Help Desk Persona: Utilizes Custom systemInstruction logic that focuses the AI on technical support and professional customer service.
+
+
+*****DATABASE SCHEMA*****
+
+-----USER SCHEMA-----
+username: String (Unique, Required)
+email: String (Unique, Required)
+password: String (Hashed via bcrypt)
+
+-----MESSAGE SCHEMA (CHAT HISTORY)-----
+userId: ObjectId (Reference to User model)
+role: String (Enum: 'user' or 'model')
+parts: Array of Objects (contains text string)
+createdAt: Date (Default: now)
+
+
+*****API DOCUMENTATION*****
+
+API Name: Google Generative AI (Gemini API)
+Model used: Gemini-3.1-flash-lite
+Endpoint: POST /api/chat (protected by requireLogin middleware)
+
+
+*****HOW TO RUN SERVER LOCALLY*****
+
+1. Install dependencies -
+
+RUN: npm install
+
+2. Environment setup: Create a .env file with PORT, MONGODB_URI, SESSION_SECRET, and GEMINI_API_KEY
+
+3. Star the server - 
+//development mode
+RUN: npm run dev
+
+//production mode
+RUN: node server.js
+
+4. Access: navigate to http://localhost:3000 in your browser
+
+
+*****Development Timeline/Changelog*****
 
 5/9/2026:
 
@@ -35,5 +90,19 @@ Development Timeline/Changelog-
 5. Wrote client-side asynchronous javascript code using the Fetch API to send messages from the front-end to the back-end and dynamically update the UI with the AI's custom-formatted response, all without having to refresh the page.
 
 6. Added comprehensive error handling to both the front-end and back-end to allow both developers and users to more easily see when an API error is happening and what kind of error so that they know how they should proceed when troubleshooting.
+
+5/13/2026:
+
+1. Fully migrated dayabase from SQLite3 to MongoDB Atlas for cloud storage.
+
+2. Refactored session storage to use MongoDB instead of local memory.
+
+3. Implemented data sanitization to strip hidden _id tags from AI-payload to resolve 400 Bad Request errors.
+
+4. Implementation of req.session.save() to prevent race conditions during login redirects.
+
+5. Added new Message schema in MongoDB to handle persistent conversation history.
+
+6. Added "Context Window" logic to /api/chat to provide the AI with the last 10 messages of history.
 
 
